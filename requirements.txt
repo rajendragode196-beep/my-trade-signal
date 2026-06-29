@@ -1,0 +1,3 @@
+pyotp
+smartapi-python
+requests
