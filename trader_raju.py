@@ -20,7 +20,7 @@ PASSWORD     = "1217"
 TOTP_SECRET  = "7LBOZEUFKN6LBWNNGMFPPJSK6Y"
 
 TELEGRAM_BOT_TOKEN = "8840916529:AAGfhCmOUa2rzWDtwmeqFLUytp68Gwv5r88"
-TELEGRAM_CHAT_ID   = "8332272265"
+TELEGRAM_CHAT_ID   = "833227226"
 
 # ==============================================================
 #  SECTION 2 — GLOBAL CONFIG (८ अटींचे पॅरामीटर्स)
@@ -115,15 +115,16 @@ def send_telegram_msg(msg):
 #  SECTION 5 — SCANNER ENGINE (८ अटींचे लाईव्ह स्कॅनिंग)
 # ==============================================================
 class ScannerEngine:
-    def _init_(self, api_instance):  # हा भाग फिक्स केला
-        self.smart = api_instance
+    def _init_(self):  # कोणतीही अडचण येऊ नये म्हणून रिकामे ठेवले आहे
+        self.smart = None
         self.active = False
         self._c5 = deque(maxlen=100); self._h5 = deque(maxlen=100)
         self._l5 = deque(maxlen=100); self._v5 = deque(maxlen=100)
         self._c15 = deque(maxlen=60)
         self.last_signal = None
 
-    def start(self):
+    def start(self, api_instance):
+        self.smart = api_instance
         self.active = True
         threading.Thread(target=self._loop, daemon=True).start()
 
@@ -235,9 +236,9 @@ if st.button("Start 24/7 Cloud Engine", use_container_width=True):
                 st.success("✅ Engine Started! Connection Successful with Angel One.")
                 st.info("🔄 Scanning Market Conditions... Dashboard is now Running 24/7 on Cloud.")
                 
-                # फिक्स केलेले इंजिन इनिशिएलायझेशन
-                scanner = ScannerEngine(smart)
-                scanner.start()
+                # सुधारित रचना: कंसात काहीही न टाकता थेट चालू करणे
+                scanner = ScannerEngine()
+                scanner.start(smart)
                 st.session_state.engine_running = True
             else:
                 st.error(f"❌ Angel One Login Failed: {data.get('message', 'Wrong Credentials')}")
