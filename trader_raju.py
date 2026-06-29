@@ -1,30 +1,29 @@
 import streamlit as st
 import threading
 import time
-import json
-from datetime import datetime, timedelta
-from collections import deque
 import requests
 import pyotp
+from datetime import datetime, timedelta
+from collections import deque
+
 try:
     from SmartApi import SmartConnect
 except ImportError:
     st.error("SmartApi not installed. Please install smartapi-python")
 
 # ==============================================================
-#  SECTION 1 — CREDENTIALS (तुमचे डिटेल्स इथे टाका)
+#  SECTION 1 — CREDENTIALS (तुमची माहिती भरा)
 # ==============================================================
 API_KEY      = "dC2jWcZV"
 CLIENT_ID    = "R292348"
 PASSWORD     = "1217"
 TOTP_SECRET  = "7LBOZEUFKN6LBWNNGMFPPJSK6Y"
 
-# Telegram Bot Details
 TELEGRAM_BOT_TOKEN = "8840916529:AAGfhCmOUa2rzWDtwmeqFLUytp68Gwv5r88"
 TELEGRAM_CHAT_ID   = "8332272265"
 
 # ==============================================================
-#  SECTION 2 — GLOBAL CONFIG 
+#  SECTION 2 — GLOBAL CONFIG (८ अटींचे पॅरामीटर्स)
 # ==============================================================
 NIFTY_SYMBOL     = "NIFTY"
 NIFTY_TOKEN      = "26000"
@@ -39,13 +38,12 @@ VOL_MULTIPLIER   = 1.5
 REFRESH_SEC      = 5
 
 # ==============================================================
-#  SECTION 3 — TECHNICAL ANALYSIS ENGINE
+#  SECTION 3 — TECHNICAL ANALYSIS ENGINE (तुमची मूळ गणिते)
 # ==============================================================
 class TAEngine:
     @staticmethod
     def ema(prices: list, period: int) -> float:
-        if not prices: return 0.0
-        if len(prices) < period: return round(sum(prices) / len(prices), 2)
+        if not prices or len(prices) < period: return 0.0
         k = 2.0 / (period + 1)
         val = sum(prices[:period]) / period
         for p in prices[period:]:
@@ -54,7 +52,7 @@ class TAEngine:
 
     @staticmethod
     def rsi(prices: list, period: int = 14) -> float:
-        if len(prices) < period + 1: return 50.0
+        if not prices or len(prices) < period + 1: return 50.0
         gains, losses = [], []
         for i in range(1, len(prices)):
             d = prices[i] - prices[i - 1]
@@ -103,71 +101,7 @@ class TAEngine:
         return ""
 
 # ==============================================================
-#  SECTION 4 — ANGEL ONE API WRAPPER
-# ==============================================================
-class AngelOneAPI:
-    def _init_(self):
-        self.smart = None
-        self.auth_token = None
-        self.connected = False
-
-    def login(self) -> bool:
-        try:
-            totp = pyotp.TOTP(TOTP_SECRET).now()
-            self.smart = SmartConnect(api_key=API_KEY)
-            data = self.smart.generateSession(CLIENT_ID, PASSWORD, totp)
-            if data["status"]:
-                self.auth_token = data["data"]["jwtToken"]
-                self.connected = True
-                return True
-            return False
-        except:
-            return False
-
-    def get_ltp(self, token: str, exchange: str = EXCHANGE_NSE) -> float:
-        try:
-            r = self.smart.ltpData(exchange, "", token)
-            return float(r["data"]["ltp"])
-        except: return 0.0
-
-    def get_option_chain(self, symbol: str, expiry: str) -> dict:
-        try:
-            url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/marketData/v1/optionChain"
-            headers = {
-                "Authorization": f"Bearer {self.auth_token}",
-                "Content-Type": "application/json", "Accept": "application/json",
-                "X-UserType": "USER", "X-SourceID": "WEB",
-            }
-            payload = {"name": symbol, "expirydate": expiry}
-            r = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
-            return self._parse_oc(r.json().get("data", []))
-        except: return {"pcr": 1.0}
-
-    def _parse_oc(self, chain: list) -> dict:
-        total_c = total_p = 0
-        for row in chain:
-            total_c += row.get("CE", {}).get("openInterest", 0)
-            total_p += row.get("PE", {}).get("openInterest", 0)
-        pcr = round(total_p / total_c, 3) if total_c > 0 else 1.0
-        return {"pcr": pcr}
-
-    def get_candles(self, token: str, interval: str, from_dt: str, to_dt: str, exchange: str = EXCHANGE_NSE) -> list:
-        try:
-            r = self.smart.getCandleData({
-                "exchange": exchange, "symboltoken": token, "interval": interval,
-                "fromdate": from_dt, "todate": to_dt,
-            })
-            out = []
-            for c in r.get("data", []):
-                out.append({
-                    "open": float(c[1]), "high": float(c[2]), "low": float(c[3]),
-                    "close": float(c[4]), "volume": float(c[5]),
-                })
-            return out
-        except: return []
-
-# ==============================================================
-#  SECTION 5 — SCANNER & TELEGRAM ALERT ENGINE
+#  SECTION 4 — TELEGRAM FUNCTIONS
 # ==============================================================
 def send_telegram_msg(msg):
     try:
@@ -177,9 +111,12 @@ def send_telegram_msg(msg):
     except:
         pass
 
+# ==============================================================
+#  SECTION 5 — SCANNER ENGINE (८ अटींचे लाईव्ह स्कॅनिंग)
+# ==============================================================
 class ScannerEngine:
     def _init_(self, api_instance):
-        self.api = api_instance
+        self.smart = api_instance
         self.active = False
         self._c5 = deque(maxlen=100); self._h5 = deque(maxlen=100)
         self._l5 = deque(maxlen=100); self._v5 = deque(maxlen=100)
@@ -191,82 +128,100 @@ class ScannerEngine:
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
-        send_telegram_msg("🎯 राजू भाऊ, क्लाउड इंजिन यशस्वीरित्या सुरू झालं आहे!\nतुमची PCR + Fib + Pattern ही मूळ स्ट्रॅटेजी आता बॅकग्राउंडला २४ तास लाईव्ह स्कॅन करेल.")
+        send_telegram_msg("🎯 राजू भाऊ, क्लाउड इंजिन तुमच्या ८ अटींच्या महा-स्ट्रॅटेजीसह सुरू झालं आहे!\n\nऑप्शन चेन + फिबोनॅची + चार्ट पॅटर्न्स स्कॅनिंग बॅकग्राउंडला २४ तास ॲक्टिव्ह झाले आहे.")
         
         while self.active:
             try:
                 now = datetime.now()
-                # Live Trading Hours Check
                 in_win = any(start <= now.strftime("%H:%M") <= end for start, end in [("09:30", "11:30"), ("13:30", "15:15")])
                 
-                ltp = self.api.get_ltp(NIFTY_TOKEN)
+                # Live LTP Fetch
+                ltp_resp = self.smart.ltpData(EXCHANGE_NSE, "", NIFTY_TOKEN)
+                ltp = float(ltp_resp["data"]["ltp"]) if ltp_resp and "data" in ltp_resp and ltp_resp["data"] else 0.0
+                
+                # जर मार्केट बंद असेल तर सेफ्टी ब्रेक (क्रॅश टाळण्यासाठी)
                 if ltp == 0.0:
                     time.sleep(REFRESH_SEC)
                     continue
 
+                # ऑप्शन चेन पीसीआर (PCR) गणना
                 days_to_thu = (3 - now.weekday()) % 7
                 expiry = (now + timedelta(days=days_to_thu)).strftime("%d%b%Y").upper()
-                oi = self.api.get_option_chain(NIFTY_SYMBOL, expiry)
-                pcr_val = oi["pcr"]
+                
+                # Option Chain API Call
+                url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/marketData/v1/optionChain"
+                headers = {"Authorization": f"Bearer {self.smart.jwtToken}", "Content-Type": "application/json", "X-UserType": "USER", "X-SourceID": "WEB"}
+                payload = {"name": NIFTY_SYMBOL, "expirydate": expiry}
+                oc_resp = requests.post(url, headers=headers, json=payload, timeout=5).json()
+                chain = oc_resp.get("data", [])
+                
+                total_c = sum(row.get("CE", {}).get("openInterest", 0) for row in chain)
+                total_p = sum(row.get("PE", {}).get("openInterest", 0) for row in chain)
+                pcr_val = round(total_p / total_c, 3) if total_c > 0 else 1.0
                 pcr_trend = "bullish" if pcr_val > PCR_BULL else "bearish" if pcr_val < PCR_BEAR else "sideways"
 
-                start_str = now.replace(hour=9, minute=15, second=0, microsecond=0).strftime("%Y-%m-%d %H:%M")
+                # कॅंडल डेटा आणणे
+                start_str = now.replace(hour=9, minute=15, second=0).strftime("%Y-%m-%d %H:%M")
                 now_str = now.strftime("%Y-%m-%d %H:%M")
+                
+                c5m_resp = self.smart.getCandleData({"exchange": EXCHANGE_NSE, "symboltoken": NIFTY_TOKEN, "interval": "FIVE_MINUTE", "fromdate": start_str, "todate": now_str})
+                c15m_resp = self.smart.getCandleData({"exchange": EXCHANGE_NSE, "symboltoken": NIFTY_TOKEN, "interval": "FIFTEEN_MINUTE", "fromdate": start_str, "todate": now_str})
 
-                c5m = self.api.get_candles(NIFTY_TOKEN, "FIVE_MINUTE", start_str, now_str)
-                c15m = self.api.get_candles(NIFTY_TOKEN, "FIFTEEN_MINUTE", start_str, now_str)
+                c5m = c5m_resp.get("data", []) if c5m_resp else []
+                c15m = c15m_resp.get("data", []) if c15m_resp else []
 
-                if c5m:
-                    for c in c5m[-10:]:
-                        self._c5.append(c["close"]); self._h5.append(c["high"])
-                        self._l5.append(c["low"]); self._v5.append(c["volume"])
-                if c15m:
-                    for c in c15m[-5:]:
-                        self._c15.append(c["close"])
+                if len(c5m) < EMA_PERIOD:
+                    time.sleep(REFRESH_SEC)
+                    continue
+
+                # डेटा डीक्यूमध्ये भरणे
+                self._c5.clear(); self._h5.clear(); self._l5.clear(); self._v5.clear(); self._c15.clear()
+                for c in c5m:
+                    self._c5.append(float(c[4])); self._h5.append(float(c[2]))
+                    self._l5.append(float(c[3])); self._v5.append(float(c[5]))
+                for c in c15m:
+                    self._c15.append(float(c[4]))
 
                 closes5, highs5, lows5, vols5, closes15 = list(self._c5), list(self._h5), list(self._l5), list(self._v5), list(self._c15)
 
-                if len(closes5) >= EMA_PERIOD:
-                    ema20 = TAEngine.ema(closes5, EMA_PERIOD)
-                    rsi = TAEngine.rsi(closes5, RSI_PERIOD)
-                    
-                    t15 = "neutral"
-                    if len(closes15) >= 2:
-                        slope = closes15[-1] - closes15[-2]
-                        t15 = "positive" if slope > 0 else "negative" if slope < 0 else "neutral"
+                # तांत्रिक अटी मोजणे
+                ema20 = TAEngine.ema(closes5, EMA_PERIOD)
+                rsi = TAEngine.rsi(closes5, RSI_PERIOD)
+                
+                t15 = "neutral"
+                if len(closes15) >= 2:
+                    t15 = "positive" if (closes15[-1] - closes15[-2]) > 0 else "negative"
 
-                    cur_vol = vols5[-1] if vols5 else 0
-                    high_vol = TAEngine.high_volume(vols5[:-1], cur_vol)
+                cur_vol = vols5[-1] if vols5 else 0
+                high_vol = TAEngine.high_volume(vols5[:-1], cur_vol)
 
-                    sh = max(highs5) if highs5 else ltp
-                    sl = min(lows5) if lows5 else ltp
-                    fibs = TAEngine.fibonacci(sh, sl)
-                    
-                    at618 = abs(ltp - fibs["0.618"]) / max(ltp, 0.01) < 0.002
-                    at50 = abs(ltp - fibs["0.500"]) / max(ltp, 0.01) < 0.002
-                    at_fib = at618 or at50
-                    fib_lbl = "0.618 Golden Pocket" if at618 else "0.500 Mid" if at50 else ""
+                sh, sl = max(highs5), min(lows5)
+                fibs = TAEngine.fibonacci(sh, sl)
+                
+                at618 = abs(ltp - fibs["0.618"]) / ltp < 0.002
+                at50 = abs(ltp - fibs["0.500"]) / ltp < 0.002
+                at_fib = at618 or at50
+                fib_lbl = "0.618 Golden Pocket" if at618 else "0.500 Mid"
 
-                    patt = ""
-                    if pcr_trend == "bullish": patt = TAEngine.pattern_bullish(closes5, lows5)
-                    elif pcr_trend == "bearish": patt = TAEngine.pattern_bearish(closes5, highs5)
+                patt = TAEngine.pattern_bullish(closes5, lows5) if pcr_trend == "bullish" else TAEngine.pattern_bearish(closes5, highs5)
 
-                    sig = None
-                    if pcr_trend == "bullish" and in_win and t15 == "positive" and at_fib and patt and ltp > ema20 and high_vol and rsi > RSI_BULL:
-                        sig = f"🟢 BUY CALL (CE)\nLTP: {ltp}\nPattern: {patt}\nFib: {fib_lbl}\nRSI: {rsi}\nSL: Below 20 EMA ({ema20})"
-                    elif pcr_trend == "bearish" and in_win and t15 == "negative" and at_fib and patt and ltp < ema20 and high_vol and rsi < RSI_BEAR:
-                        sig = f"🔴 BUY PUT (PE)\nLTP: {ltp}\nPattern: {patt}\nFib: {fib_lbl}\nRSI: {rsi}\nSL: Above Candle High"
+                # 🔥 ८ अटींचे फायनल कॉन्फ्लुएन्स इव्हॅल्युएशन
+                sig = None
+                if pcr_trend == "bullish" and in_win and t15 == "positive" and at_fib and patt and ltp > ema20 and high_vol and rsi > RSI_BULL:
+                    sig = f"🟢 BUY CALL (CE)\n🎯 LTP: {ltp}\n📈 Pattern: {patt}\n🔱 Fib: {fib_lbl}\n📊 RSI: {rsi}\n🛡️ SL: Below 20 EMA ({ema20})"
+                elif pcr_trend == "bearish" and in_win and t15 == "negative" and at_fib and patt and ltp < ema20 and high_vol and rsi < RSI_BEAR:
+                    sig = f"🔴 BUY PUT (PE)\n🎯 LTP: {ltp}\n📉 Pattern: {patt}\n🔱 Fib: {fib_lbl}\n📊 RSI: {rsi}\n🛡️ SL: Above Candle High"
 
-                    if sig and sig != self.last_signal:
-                        self.last_signal = sig
-                        send_telegram_msg(f"🚨 NEW SIGNAL ALERT 🚨\n\n{sig}\n\n_All 8 Confluence Conditions Matched!_")
+                if sig and sig != self.last_signal:
+                    self.last_signal = sig
+                    send_telegram_msg(f"🚨 NEW 8-CONFLUENCE SIGNAL 🚨\n\n{sig}\n\n_सर्व ८ अटी मॅच झाल्या आहेत!_")
 
             except:
                 pass
             time.sleep(REFRESH_SEC)
 
 # ==============================================================
-#  SECTION 6 — STREAMLIT CLOUD UI
+#  SECTION 6 — STREAMLIT UI
 # ==============================================================
 st.set_page_config(page_title="Trade Cloud Dashboard", page_icon="🚀")
 st.title("🚀 Raju Bhau's 24/7 Trade Cloud Dashboard")
@@ -279,20 +234,25 @@ if st.button("Start 24/7 Cloud Engine", use_container_width=True):
     if API_KEY == "YOUR_ANGEL_API_KEY":
         st.error("⚠️ कृपया कोडमध्ये तुमचे API Keys आणि Telegram Token भरा!")
     elif not st.session_state.engine_running:
-        api_obj = AngelOneAPI()
-        if api_obj.login():
-            st.success("✅ Engine Started! Connection Successful with Angel One.")
-            st.info("🔄 Scanning Market Conditions (PCR + Fib + Patterns)... Dashboard is now Running 24/7 on Cloud.")
+        try:
+            totp = pyotp.TOTP(TOTP_SECRET).now()
+            smart = SmartConnect(api_key=API_KEY)
+            data = smart.generateSession(CLIENT_ID, PASSWORD, totp)
             
-            # Error fixed here: Passing the correct instance
-            scanner_obj = ScannerEngine(api_obj)
-            scanner_obj.start()
-            st.session_state.engine_running = True
-        else:
-            st.error("❌ Angel One Login Failed. Check your Credentials.")
+            if data["status"]:
+                st.success("✅ Engine Started! Connection Successful with Angel One.")
+                st.info("🔄 Scanning Market Conditions... Dashboard is now Running 24/7 on Cloud.")
+                
+                scanner = ScannerEngine(smart)
+                scanner.start()
+                st.session_state.engine_running = True
+            else:
+                st.error(f"❌ Angel One Login Failed: {data.get('message', 'Wrong Credentials')}")
+        except Exception as e:
+            st.error(f"❌ सिस्टीम एरर: {str(e)}")
     else:
-        st.warning("⚡ Engine is already running in the background!")
+        st.warning("⚡ Engine is already running!")
 
 if st.session_state.engine_running:
-    st.markdown("### 🟢 System Status: *ACTIVE & SCANNING LIVE*")
-    st.write("डॅशबोर्ड बॅकग्राउंडला सुरक्षित सुरू आहे. आता थेट टेलिग्रामवर मेसेज तपासा!")
+    st.markdown("### 🟢 System Status: *ACTIVE & RUNNING*")
+    st.write("डॅशबोर्ड सुरक्षित सुरू झाला आहे. ८ अटींचे स्कॅनर बॅकग्राउंडला कार्यरत आहे!")
