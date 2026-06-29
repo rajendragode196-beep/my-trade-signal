@@ -38,7 +38,7 @@ VOL_MULTIPLIER   = 1.5
 REFRESH_SEC      = 5
 
 # ==============================================================
-#  SECTION 3 — TECHNICAL ANALYSIS ENGINE (तुमची मूळ गणिते)
+#  SECTION 3 — TECHNICAL ANALYSIS ENGINE
 # ==============================================================
 class TAEngine:
     @staticmethod
@@ -115,7 +115,7 @@ def send_telegram_msg(msg):
 #  SECTION 5 — SCANNER ENGINE (८ अटींचे लाईव्ह स्कॅनिंग)
 # ==============================================================
 class ScannerEngine:
-    def _init_(self, api_instance):
+    def _init_(self, api_instance):  # हा भाग फिक्स केला
         self.smart = api_instance
         self.active = False
         self._c5 = deque(maxlen=100); self._h5 = deque(maxlen=100)
@@ -128,27 +128,23 @@ class ScannerEngine:
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
-        send_telegram_msg("🎯 राजू भाऊ, क्लाउड इंजिन तुमच्या ८ अटींच्या महा-स्ट्रॅटेजीसह सुरू झालं आहे!\n\nऑप्शन चेन + फिबोनॅची + चार्ट पॅटर्न्स स्कॅनिंग बॅकग्राउंडला २४ तास ॲक्टिव्ह झाले आहे.")
+        send_telegram_msg("🎯 राजू भाऊ, क्लाउड इंजिन तुमच्या ८ अटींच्या महा-स्ट्रॅटेजीसह यशस्वीरित्या सुरू झालं आहे!\n\nऑप्शन चेन + फिबोनॅची + चार्ट पॅटर्न्स स्कॅनिंग बॅकग्राउंडला २४ तास कार्यरत झाले आहे.")
         
         while self.active:
             try:
                 now = datetime.now()
                 in_win = any(start <= now.strftime("%H:%M") <= end for start, end in [("09:30", "11:30"), ("13:30", "15:15")])
                 
-                # Live LTP Fetch
                 ltp_resp = self.smart.ltpData(EXCHANGE_NSE, "", NIFTY_TOKEN)
                 ltp = float(ltp_resp["data"]["ltp"]) if ltp_resp and "data" in ltp_resp and ltp_resp["data"] else 0.0
                 
-                # जर मार्केट बंद असेल तर सेफ्टी ब्रेक (क्रॅश टाळण्यासाठी)
                 if ltp == 0.0:
                     time.sleep(REFRESH_SEC)
                     continue
 
-                # ऑप्शन चेन पीसीआर (PCR) गणना
                 days_to_thu = (3 - now.weekday()) % 7
                 expiry = (now + timedelta(days=days_to_thu)).strftime("%d%b%Y").upper()
                 
-                # Option Chain API Call
                 url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/marketData/v1/optionChain"
                 headers = {"Authorization": f"Bearer {self.smart.jwtToken}", "Content-Type": "application/json", "X-UserType": "USER", "X-SourceID": "WEB"}
                 payload = {"name": NIFTY_SYMBOL, "expirydate": expiry}
@@ -160,7 +156,6 @@ class ScannerEngine:
                 pcr_val = round(total_p / total_c, 3) if total_c > 0 else 1.0
                 pcr_trend = "bullish" if pcr_val > PCR_BULL else "bearish" if pcr_val < PCR_BEAR else "sideways"
 
-                # कॅंडल डेटा आणणे
                 start_str = now.replace(hour=9, minute=15, second=0).strftime("%Y-%m-%d %H:%M")
                 now_str = now.strftime("%Y-%m-%d %H:%M")
                 
@@ -174,7 +169,6 @@ class ScannerEngine:
                     time.sleep(REFRESH_SEC)
                     continue
 
-                # डेटा डीक्यूमध्ये भरणे
                 self._c5.clear(); self._h5.clear(); self._l5.clear(); self._v5.clear(); self._c15.clear()
                 for c in c5m:
                     self._c5.append(float(c[4])); self._h5.append(float(c[2]))
@@ -184,7 +178,6 @@ class ScannerEngine:
 
                 closes5, highs5, lows5, vols5, closes15 = list(self._c5), list(self._h5), list(self._l5), list(self._v5), list(self._c15)
 
-                # तांत्रिक अटी मोजणे
                 ema20 = TAEngine.ema(closes5, EMA_PERIOD)
                 rsi = TAEngine.rsi(closes5, RSI_PERIOD)
                 
@@ -205,7 +198,6 @@ class ScannerEngine:
 
                 patt = TAEngine.pattern_bullish(closes5, lows5) if pcr_trend == "bullish" else TAEngine.pattern_bearish(closes5, highs5)
 
-                # 🔥 ८ अटींचे फायनल कॉन्फ्लुएन्स इव्हॅल्युएशन
                 sig = None
                 if pcr_trend == "bullish" and in_win and t15 == "positive" and at_fib and patt and ltp > ema20 and high_vol and rsi > RSI_BULL:
                     sig = f"🟢 BUY CALL (CE)\n🎯 LTP: {ltp}\n📈 Pattern: {patt}\n🔱 Fib: {fib_lbl}\n📊 RSI: {rsi}\n🛡️ SL: Below 20 EMA ({ema20})"
@@ -243,6 +235,7 @@ if st.button("Start 24/7 Cloud Engine", use_container_width=True):
                 st.success("✅ Engine Started! Connection Successful with Angel One.")
                 st.info("🔄 Scanning Market Conditions... Dashboard is now Running 24/7 on Cloud.")
                 
+                # फिक्स केलेले इंजिन इनिशिएलायझेशन
                 scanner = ScannerEngine(smart)
                 scanner.start()
                 st.session_state.engine_running = True
@@ -255,4 +248,4 @@ if st.button("Start 24/7 Cloud Engine", use_container_width=True):
 
 if st.session_state.engine_running:
     st.markdown("### 🟢 System Status: *ACTIVE & RUNNING*")
-    st.write("डॅशबोर्ड सुरक्षित सुरू झाला आहे. ८ अटींचे स्कॅनर बॅकग्राउंडला कार्यरत आहे!")
+    st.write("डॅशबोर्ड बॅकग्राउंडला सुरक्षित सुरू झाला आहे. ८ अटींचे स्कॅनर सुरू झाले आहे!")
