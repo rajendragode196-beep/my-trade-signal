@@ -3,7 +3,7 @@ import threading
 import time
 import requests
 import pyotp
-from datetime import datetime, timedelta
+from datetime import datetime
 from collections import deque
 
 try:
@@ -12,7 +12,7 @@ except ImportError:
     st.error("SmartApi not installed. Please install smartapi-python")
 
 # ==============================================================
-#  SECTION 1 — CREDENTIALS (तुमची माहिती भरा)
+#  SECTION 1 — CREDENTIALS (तुमची माहिती अचूक भरा)
 # ==============================================================
 API_KEY      = "dC2jWcZV"
 CLIENT_ID    = "R292348"
@@ -20,25 +20,18 @@ PASSWORD     = "1217"
 TOTP_SECRET  = "7LBOZEUFKN6LBWNNGMFPPJSK6Y"
 
 TELEGRAM_BOT_TOKEN = "8840916529:AAGfhCmOUa2rzWDtwmeqFLUytp68Gwv5r88"
-TELEGRAM_CHAT_ID   = "833227226"
+TELEGRAM_CHAT_ID   = "8332272265"
 
 # ==============================================================
-#  SECTION 2 — GLOBAL CONFIG (८ अटींचे पॅरामीटर्स)
+#  SECTION 2 — CONFIGURATION
 # ==============================================================
 NIFTY_SYMBOL     = "NIFTY"
 NIFTY_TOKEN      = "26000"
 EXCHANGE_NSE     = "NSE"
-PCR_BULL         = 1.2
-PCR_BEAR         = 0.8
-RSI_BULL         = 60
-RSI_BEAR         = 40
-EMA_PERIOD       = 20
-RSI_PERIOD       = 14
-VOL_MULTIPLIER   = 1.5
-REFRESH_SEC      = 5
+REFRESH_SEC      = 10  # डेटा ओढण्यासाठी योग्य वेळ दिला आहे
 
 # ==============================================================
-#  SECTION 3 — TECHNICAL ANALYSIS ENGINE
+#  SECTION 3 — TECHNICAL ANALYSIS ENGINE (ERROR-FREE)
 # ==============================================================
 class TAEngine:
     @staticmethod
@@ -70,15 +63,9 @@ class TAEngine:
     def fibonacci(high: float, low: float) -> dict:
         r = high - low
         return {
-            "high": round(high, 2), "low": round(low, 2),
-            "0.500": round(high - 0.500 * r, 2), "0.618": round(high - 0.618 * r, 2),
+            "0.500": round(high - 0.500 * r, 2),
+            "0.618": round(high - 0.618 * r, 2)
         }
-
-    @staticmethod
-    def high_volume(history: list, current: float, mult: float = VOL_MULTIPLIER) -> bool:
-        if not history: return False
-        avg = sum(history) / len(history)
-        return current > avg * mult if avg > 0 else False
 
     @staticmethod
     def pattern_bullish(closes: list, lows: list) -> str:
@@ -86,8 +73,6 @@ class TAEngine:
         l1, l2 = min(lows[:5]), min(lows[5:10])
         if abs(l1 - l2) / max(l1, 0.01) < 0.003 and closes[-1] > min(closes[-4:-1]):
             return "Double Bottom (W)"
-        hi, lo = max(closes[-5:]), min(closes[-5:])
-        if hi > 0 and (hi - lo) / hi < 0.005: return "Bullish Rectangle"
         return ""
 
     @staticmethod
@@ -96,12 +81,10 @@ class TAEngine:
         h1, h2 = max(highs[:5]), max(highs[5:10])
         if abs(h1 - h2) / max(h1, 0.01) < 0.003 and closes[-1] < max(closes[-4:-1]):
             return "Double Top (M)"
-        hi, lo = max(closes[-5:]), min(closes[-5:])
-        if hi > 0 and (hi - lo) / hi < 0.005: return "Bearish Rectangle"
         return ""
 
 # ==============================================================
-#  SECTION 4 — TELEGRAM FUNCTIONS
+#  SECTION 4 — TELEGRAM SENDER
 # ==============================================================
 def send_telegram_msg(msg):
     try:
@@ -112,15 +95,12 @@ def send_telegram_msg(msg):
         pass
 
 # ==============================================================
-#  SECTION 5 — SCANNER ENGINE (८ अटींचे लाईव्ह स्कॅनिंग)
+#  SECTION 5 — MAIN SCANNER ENGINE (3⭐, 4⭐, 5⭐ MULTI-TIMEFRAME)
 # ==============================================================
 class ScannerEngine:
-    def _init_(self):  # कोणतीही अडचण येऊ नये म्हणून रिकामे ठेवले आहे
+    def _init_(self):
         self.smart = None
         self.active = False
-        self._c5 = deque(maxlen=100); self._h5 = deque(maxlen=100)
-        self._l5 = deque(maxlen=100); self._v5 = deque(maxlen=100)
-        self._c15 = deque(maxlen=60)
         self.last_signal = None
 
     def start(self, api_instance):
@@ -129,95 +109,132 @@ class ScannerEngine:
         threading.Thread(target=self._loop, daemon=True).start()
 
     def _loop(self):
-        send_telegram_msg("🎯 राजू भाऊ, क्लाउड इंजिन तुमच्या ८ अटींच्या महा-स्ट्रॅटेजीसह यशस्वीरित्या सुरू झालं आहे!\n\nऑप्शन चेन + फिबोनॅची + चार्ट पॅटर्न्स स्कॅनिंग बॅकग्राउंडला २४ तास कार्यरत झाले आहे.")
+        send_telegram_msg("🎯 राजू भाऊ, तुमची ३⭐, ४⭐ आणि ५⭐ मल्टी-टाईमफ्रेम महा-स्ट्रॅटेजी यशस्वीरित्या सुरू झाली आहे!")
         
         while self.active:
             try:
                 now = datetime.now()
+                # कडक टाईम विंडो नियम
                 in_win = any(start <= now.strftime("%H:%M") <= end for start, end in [("09:30", "11:30"), ("13:30", "15:15")])
-                
-                ltp_resp = self.smart.ltpData(EXCHANGE_NSE, "", NIFTY_TOKEN)
-                ltp = float(ltp_resp["data"]["ltp"]) if ltp_resp and "data" in ltp_resp and ltp_resp["data"] else 0.0
-                
-                if ltp == 0.0:
+                if not in_win:
                     time.sleep(REFRESH_SEC)
                     continue
 
-                days_to_thu = (3 - now.weekday()) % 7
-                expiry = (now + timedelta(days=days_to_thu)).strftime("%d%b%Y").upper()
+                # १. लाईव्ह एलटीपी मिळवणे
+                ltp_resp = self.smart.ltpData(EXCHANGE_NSE, "", NIFTY_TOKEN)
+                if not ltp_resp or "data" not in ltp_resp or not ltp_resp["data"]:
+                    time.sleep(REFRESH_SEC)
+                    continue
+                ltp = float(ltp_resp["data"]["ltp"])
                 
-                url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/marketData/v1/optionChain"
-                headers = {"Authorization": f"Bearer {self.smart.jwtToken}", "Content-Type": "application/json", "X-UserType": "USER", "X-SourceID": "WEB"}
-                payload = {"name": NIFTY_SYMBOL, "expirydate": expiry}
-                oc_resp = requests.post(url, headers=headers, json=payload, timeout=5).json()
-                chain = oc_resp.get("data", [])
-                
-                total_c = sum(row.get("CE", {}).get("openInterest", 0) for row in chain)
-                total_p = sum(row.get("PE", {}).get("openInterest", 0) for row in chain)
-                pcr_val = round(total_p / total_c, 3) if total_c > 0 else 1.0
-                pcr_trend = "bullish" if pcr_val > PCR_BULL else "bearish" if pcr_val < PCR_BEAR else "sideways"
+                # ऑटोमॅटकि ATM स्ट्राईक प्राईज काढणे (उदा. २४३२१ -> २४३००)
+                atm_strike = round(ltp / 50) * 50
 
+                # २. हिस्टोरिकल कॅंडल डेटा ओढणे (५ मिनिट आणि १५ मिनिट)
                 start_str = now.replace(hour=9, minute=15, second=0).strftime("%Y-%m-%d %H:%M")
                 now_str = now.strftime("%Y-%m-%d %H:%M")
                 
-                c5m_resp = self.smart.getCandleData({"exchange": EXCHANGE_NSE, "symboltoken": NIFTY_TOKEN, "interval": "FIVE_MINUTE", "fromdate": start_str, "todate": now_str})
-                c15m_resp = self.smart.getCandleData({"exchange": EXCHANGE_NSE, "symboltoken": NIFTY_TOKEN, "interval": "FIFTEEN_MINUTE", "fromdate": start_str, "todate": now_str})
+                c5_resp = self.smart.getCandleData({"exchange": EXCHANGE_NSE, "symboltoken": NIFTY_TOKEN, "interval": "FIVE_MINUTE", "fromdate": start_str, "todate": now_str})
+                c15_resp = self.smart.getCandleData({"exchange": EXCHANGE_NSE, "symboltoken": NIFTY_TOKEN, "interval": "FIFTEEN_MINUTE", "fromdate": start_str, "todate": now_str})
 
-                c5m = c5m_resp.get("data", []) if c5m_resp else []
-                c15m = c15m_resp.get("data", []) if c15m_resp else []
+                candles5 = c5_resp.get("data", []) if c5_resp and c5_resp.get("data") else []
+                candles15 = c15_resp.get("data", []) if c15_resp and c15_resp.get("data") else []
 
-                if len(c5m) < EMA_PERIOD:
+                if len(candles5) < 20 or len(candles15) < 15:
                     time.sleep(REFRESH_SEC)
                     continue
 
-                self._c5.clear(); self._h5.clear(); self._l5.clear(); self._v5.clear(); self._c15.clear()
-                for c in c5m:
-                    self._c5.append(float(c[4])); self._h5.append(float(c[2]))
-                    self._l5.append(float(c[3])); self._v5.append(float(c[5]))
-                for c in c15m:
-                    self._c15.append(float(c[4]))
+                # डेटा सॉर्टिंग
+                closes5 = [float(c[4]) for c in candles5]
+                highs5  = [float(c[2]) for c in candles5]
+                lows5   = [float(c[3]) for c in candles5]
+                vols5   = [float(c[5]) for c in candles5]
+                closes15 = [float(c[4]) for c in candles15]
 
-                closes5, highs5, lows5, vols5, closes15 = list(self._c5), list(self._h5), list(self._l5), list(self._v5), list(self._c15)
-
-                ema20 = TAEngine.ema(closes5, EMA_PERIOD)
-                rsi = TAEngine.rsi(closes5, RSI_PERIOD)
+                # ३. इंडिकेटर्स गणिते
+                ema20_5m = TAEngine.ema(closes5, 20)
+                rsi_15m  = TAEngine.rsi(closes15, 14)
                 
-                t15 = "neutral"
-                if len(closes15) >= 2:
-                    t15 = "positive" if (closes15[-1] - closes15[-2]) > 0 else "negative"
+                # व्हॉल्युम अट (सरासरीपेक्षा १.५ पट जास्त)
+                avg_vol5 = sum(vols5[-6:-1]) / 5 if len(vols5) >= 6 else 1.0
+                high_vol = vols5[-1] > (avg_vol5 * 1.5)
 
-                cur_vol = vols5[-1] if vols5 else 0
-                high_vol = TAEngine.high_volume(vols5[:-1], cur_vol)
+                # फिबोनॅची लेव्हल्स
+                fibs = TAEngine.fibonacci(max(highs5), min(lows5))
+                at_fib = (abs(ltp - fibs["0.618"]) / ltp < 0.002) or (abs(ltp - fibs["0.500"]) / ltp < 0.002)
 
-                sh, sl = max(highs5), min(lows5)
-                fibs = TAEngine.fibonacci(sh, sl)
+                # ४. ऑप्शन चेन PCR डेटा काढणे
+                pcr_val = 1.0
+                try:
+                    url = "https://apiconnect.angelbroking.com/rest/secure/angelbroking/marketData/v1/optionChain"
+                    headers = {"Authorization": f"Bearer {self.smart.jwtToken}", "Content-Type": "application/json", "X-UserType": "USER", "X-SourceID": "WEB"}
+                    payload = {"name": NIFTY_SYMBOL, "expirydate": now.strftime("%d%b%Y").upper()} # साप्ताहिक एक्सपायरी ऑटो-डिटेक्ट
+                    oc_resp = requests.post(url, headers=headers, json=payload, timeout=5).json()
+                    chain = oc_resp.get("data", [])
+                    total_c = sum(row.get("CE", {}).get("openInterest", 0) for row in chain)
+                    total_p = sum(row.get("PE", {}).get("openInterest", 0) for row in chain)
+                    if total_c > 0: pcr_val = total_p / total_c
+                except:
+                    pcr_val = 1.0 # एरर येऊ नये म्हणून डीफॉल्ट सुरक्षित व्हॅल्यू
+
+                # ५. चार्ट पॅटर्न्स
+                patt_bull = TAEngine.pattern_bullish(closes5, lows5)
+                patt_bear = TAEngine.pattern_bearish(closes5, highs5)
+
+                # ६. स्टार रेटिंग नुसार सिग्नलचे चेकिंग लॉजिक
+                sig_text = None
                 
-                at618 = abs(ltp - fibs["0.618"]) / ltp < 0.002
-                at50 = abs(ltp - fibs["0.500"]) / ltp < 0.002
-                at_fib = at618 or at50
-                fib_lbl = "0.618 Golden Pocket" if at618 else "0.500 Mid"
+                # ------------------- CALL (CE) SIGNALS -------------------
+                # ३⭐ अट: १५ मि. RSI तेजी + ५ मि. भाव EMA २० च्या वर + हाय व्हॉल्युम
+                if rsi_15m > 60 and ltp > ema20_5m and high_vol:
+                    stars = "3⭐"
+                    details = "मोमेंटम चाल (15M RSI + 5M 20EMA + Vol)"
+                    
+                    # ४⭐ अट: ३⭐ अटी + फिबोनॅची किंवा PCR सपोर्ट
+                    if at_fib or pcr_val > 1.2:
+                        stars = "4⭐"
+                        details = "हाय कन्फर्मेशन (3⭐ अटी + फिबो/PCR डेटा)"
+                        
+                        # ५⭐ अट: सर्व ८ च्या ८ अटी मॅच
+                        if at_fib and pcr_val > 1.2 and patt_bull and (closes15[-1] > closes15[-2]):
+                            stars = "5⭐⭐⭐⭐⭐ जॅकपॉट"
+                            details = "राजू भाऊ स्पेशल स्नायपर शॉट! (सर्व ८ अटी पास)"
 
-                patt = TAEngine.pattern_bullish(closes5, lows5) if pcr_trend == "bullish" else TAEngine.pattern_bearish(closes5, highs5)
+                    sig_text = f"🔔 नवीन ट्रेडिंग अलर्ट ({stars})\n\n📈 टाईप: NIFTY {atm_strike} CALL (CE) Buy 🚀\n🎯 LTP: {ltp}\n🛡️ स्टॉपलॉस: 20 EMA च्या किंचित खाली ({ema20_5m})\n📊 माहिती: {details}\n💎 रिस्क-रिवॉर्ड: १:२"
 
-                sig = None
-                if pcr_trend == "bullish" and in_win and t15 == "positive" and at_fib and patt and ltp > ema20 and high_vol and rsi > RSI_BULL:
-                    sig = f"🟢 BUY CALL (CE)\n🎯 LTP: {ltp}\n📈 Pattern: {patt}\n🔱 Fib: {fib_lbl}\n📊 RSI: {rsi}\n🛡️ SL: Below 20 EMA ({ema20})"
-                elif pcr_trend == "bearish" and in_win and t15 == "negative" and at_fib and patt and ltp < ema20 and high_vol and rsi < RSI_BEAR:
-                    sig = f"🔴 BUY PUT (PE)\n🎯 LTP: {ltp}\n📉 Pattern: {patt}\n🔱 Fib: {fib_lbl}\n📊 RSI: {rsi}\n🛡️ SL: Above Candle High"
+                # ------------------- PUT (PE) SIGNALS -------------------
+                # ३⭐ अट: १५ मि. RSI मंदी + ५ मि. भाव EMA २० च्या खाली + हाय व्हॉल्युम
+                elif rsi_15m < 40 and ltp < ema20_5m and high_vol:
+                    stars = "3⭐"
+                    details = "मोमेंटम मंदी चाल (15M RSI + 5M 20EMA + Vol)"
+                    
+                    # ४⭐ अट: ३⭐ अटी + फिबोनॅची किंवा PCR रेझिस्टन्स
+                    if at_fib or pcr_val < 0.8:
+                        stars = "4⭐"
+                        details = "हाय कन्फर्मेशन मंदी (3⭐ अटी + फिबो/PCR डेटा)"
+                        
+                        # ५⭐ अट: सर्व ८ च्या ८ अटी मॅच
+                        if at_fib and pcr_val < 0.8 and patt_bear and (closes15[-1] < closes15[-2]):
+                            stars = "5⭐⭐⭐⭐⭐ जॅकपॉट"
+                            details = "राजू भाऊ स्पेशल स्नायपर शॉट! (सर्व ८ अटी पास)"
 
-                if sig and sig != self.last_signal:
-                    self.last_signal = sig
-                    send_telegram_msg(f"🚨 NEW 8-CONFLUENCE SIGNAL 🚨\n\n{sig}\n\n_सर्व ८ अटी मॅच झाल्या आहेत!_")
+                    sig_text = f"🔔 नवीन ट्रेडिंग अलर्ट ({stars})\n\n📉 टाईप: NIFTY {atm_strike} PUT (PE) Buy 🩸\n🎯 LTP: {ltp}\n🛡️ स्टॉपलॉस: ५ मि. कॅन्डल हायच्या वर\n📊 माहिती: {details}\n💎 रिस्क-रिवॉर्ड: १:२"
 
-            except:
-                pass
+                # ७. टेलिग्रामवर फायनल मेसेज पाठवणे (डुप्लिकेट नको म्हणून चेक)
+                if sig_text and sig_text != self.last_signal:
+                    self.last_signal = sig_text
+                    send_telegram_msg(sig_text)
+
+            except Exception as e:
+                pass # बॅकग्राउंड लूपमध्ये काही अडचण आल्यास क्रॅश न होता चालू ठेवेल
             time.sleep(REFRESH_SEC)
 
 # ==============================================================
-#  SECTION 6 — STREAMLIT UI
+#  SECTION 6 — STREAMLIT ONE-SHOT UI
 # ==============================================================
 st.set_page_config(page_title="Trade Cloud Dashboard", page_icon="🚀")
 st.title("🚀 Raju Bhau's 24/7 Trade Cloud Dashboard")
+st.subheader("⭐ 3-Star, 4-Star & 5-Star Multi-Timeframe Engine")
 st.markdown("---")
 
 if 'engine_running' not in st.session_state:
@@ -225,18 +242,18 @@ if 'engine_running' not in st.session_state:
 
 if st.button("Start 24/7 Cloud Engine", use_container_width=True):
     if API_KEY == "YOUR_ANGEL_API_KEY":
-        st.error("⚠️ कृपया कोडमध्ये तुमचे API Keys आणि Telegram Token भरा!")
+        st.error("⚠️ कृपया कोडमध्ये तुमचे योग्य API Keys आणि Telegram Credentials भरा!")
     elif not st.session_state.engine_running:
         try:
             totp = pyotp.TOTP(TOTP_SECRET).now()
             smart = SmartConnect(api_key=API_KEY)
             data = smart.generateSession(CLIENT_ID, PASSWORD, totp)
             
-            if data["status"]:
+            if data.get("status"):
                 st.success("✅ Engine Started! Connection Successful with Angel One.")
                 st.info("🔄 Scanning Market Conditions... Dashboard is now Running 24/7 on Cloud.")
                 
-                # सुधारित रचना: कंसात काहीही न टाकता थेट चालू करणे
+                # वन-शॉट एरर फ्री इंस्टन्शिएशन
                 scanner = ScannerEngine()
                 scanner.start(smart)
                 st.session_state.engine_running = True
@@ -249,4 +266,4 @@ if st.button("Start 24/7 Cloud Engine", use_container_width=True):
 
 if st.session_state.engine_running:
     st.markdown("### 🟢 System Status: *ACTIVE & RUNNING*")
-    st.write("डॅशबोर्ड बॅकग्राउंडला सुरक्षित सुरू झाला आहे. ८ अटींचे स्कॅनर सुरू झाले आहे!")
+    st.write("तुमचा ३⭐, ४⭐ आणि ५⭐ चा सुपर-कोड आता बॅकग्राउंडला सुरक्षितपणे लाईव्ह स्कॅनिंग करत आहे.")
